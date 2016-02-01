@@ -1,0 +1,40 @@
+Student Name:	Haicheng (Hansey) Chen
+Name.#:			chen.4800
+
+Q:	How to make the program?
+A:	Type the following command in your terminal.
+	$ make
+
+Q:	How to run the program?
+A:	Type the following command in your terminal.
+	$ ./count <inputfile-name> <search-string> <outputfile-name>
+
+Q:	How to deal with error "ERROR: Wrong usage of count...."?
+A:	In order to launch count program, you have to specify three parameters
+	other than the program's name:
+	1. The name of the input file;
+	2. The string you want to search;
+	3. The name of the output file.
+	Let say you have an input file called "input". You want to search string
+	"hey" in the input file. And you want to save the result into a file
+	called "output". Then you should launch the count program using the
+	following command:
+	$ ./count input hey output
+
+Q:	How to deal with error "ERROR: Input file xxx cannot be read."?
+A:	The reason you are facing with such a program is either your specified
+	input file does not exist or you don't have the permission to read it.
+	Please try changing the permission of the input file or change another
+	input file.
+
+Q:	How to deal with error "ERROR: Output file xxx already exists."?
+A:	As indicated by the error message, your specified output file already
+	exists. Please try to use another output file name.
+
+Q:	How to deal with other errors?
+A:	If other error message occurs, please contact with the author using the
+	following email address:
+	chen.4800@osu.edu
+	I'm happy to help.
+
+Enjoy!

@@ -1,0 +1,51 @@
+File Transfer Application Using TCP Sockets
+
+Authors: Xiang Li and Haicheng Chen
+Last Update: 01/25/2016
+
+Q1:	How to compile the program?
+A1:	Just type the following command in your terminal:
+	
+	$ make
+
+Q2:	How to run the program?
+A1:	First start the server by using the follwing command:
+	
+	$ ./ftps
+	
+	This command will launch the server. The server will be
+	automatically binded to 1040 port. If you want to
+	launch the client in the same machine or terminal,
+	please use the following command instead:
+	
+	$ ./ftps &
+	
+	This command will launch the server in the background,
+	so that you can continue to launch your client in the
+	same machine/terminal. After the server in launched,
+	you will see the following information:
+	
+	$ TCP server waiting for remote connection from clients ...
+
+	This message indicates that the server is successfully
+	started. Now you can go ahead to start your client using
+	the following command:
+
+	$ ./ftpc <host-ip> <remote-port> <file-to-be-sent>
+
+	For example, suppose the server is started on 164.107.113.21,
+	the port number is 1040 and you want to send a file called
+	foo. Then you can launch the client using the following
+	command:
+
+	$ ./ftpc 164.107.113.21 1040 foo
+
+	Once the server starts receiving the file,
+	the following message will be printed out:
+	
+	$ Create a directory named FTPFolder to hold the file.
+	$ Server receiving file foo...
+
+	After successfully send out the file, the client will
+	automatically end itself. Once the server successfully
+	receives the file, it will automatically stop.

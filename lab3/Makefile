@@ -3,8 +3,8 @@
 # Makefile for ftps and ftpc
 
 CC = gcc
-OBJCLI = ftpc.c 
-OBJSRV = ftps.c
+OBJCLI = ftpc.c cse5462lib.c
+OBJSRV = ftps.c cse5462lib.c
 CFLAGS = -g
 # setup for system
 LIBS =

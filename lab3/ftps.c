@@ -1,11 +1,9 @@
-// CSE5462 Sp2016 Lab2 
+// CSE5462 Sp2016 Lab3 
 // Group member: Xiang Li, Haicheng Chen
-// Author of this file (ftps.c): Xiang Li
-// Date: 01/21/2016
+// Date: 01/27/2016
 
-// FTP server using TCP
+// FTP server using UDP
 
-// Server for accepting an Internet stream connection on port 1040
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -18,38 +16,54 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include "cse5462lib.h"
 
-#define PORT 1040       // socket file name
 #define BUF_SIZE 1000	// Buffer size
+#define PORT 1060
 
-// Construct the TCP connection
-void construct_TCP(int *sk, int *fsk, struct sockaddr_in *sia) {
+// This function checks the validity of the port number
+// But it is not used this time because the port number is hardcoded
+int check_port(char *port) {
+	int i = 0;
+	uint32_t sum = 0;
+	// check length
+	int length = strlen(port);
+	if(length > 5) {
+		return -1;
+	}
+	// check each digit and range
+	for(i = 0; i < length; ++i) {
+		if(port[i] < '0' || port[i] > '9') {
+			return -1;
+		} else {
+			sum = (sum * 10) + (port[i] - '0');
+			if(sum > 65536) {
+				return -1;
+			}
+		}
+	}
+	return 0;
+}
+
+// Construct the connection. Note that *fsk is not used.
+void construct_connection(int *sk, int *fsk, struct sockaddr_in *sia) {
 	// Initialize socket connection in unix domain
-	if((*sk = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-		perror("Error openting TCP socket!");
+	if((*sk = SOCKET(AF_INET, SOCK_DGRAM, 0)) < 0){
+		perror("Error opening UDP socket");
 		exit(1);
 	}
   
 	// Construct name of socket to send to
 	sia->sin_family = AF_INET;
-	sia->sin_addr.s_addr = INADDR_ANY;
+	sia->sin_addr.s_addr = htonl(INADDR_ANY);
 	sia->sin_port = htons(PORT);
 	memset(&(sia->sin_zero), '\0', 8);
 
 	// Bind socket name to socket
 	if(bind(*sk, (struct sockaddr *)sia, sizeof(struct sockaddr_in)) < 0) {
-		perror("Error binding stream socket");
+		perror("Error binding UDP socket");
 		exit(1);
 	}
-  
-	// Listen for socket connection and set max opened socket connetions to 1
-	listen(*sk, 1);
-  
-	// Accept a (1) connection in socket msgsocket */ 
-	if((*fsk = accept(*sk, (struct sockaddr *)NULL, (int *)NULL)) == -1) { 
-		perror("Error connecting stream socket");
-		exit(1);
-	} 
 }
 
 // Helper function used to obtain the file information. 
@@ -59,7 +73,7 @@ char* obtain_file_info(int file_sock, void *read_buf, size_t *rdct, int *fln) {
 	void *rdbf = read_buf;
 	while (*rdct < 24) {
 		/* read from file_sock and place in read_buf */
-		ssize_t rc = recv(file_sock, rdbf, BUF_SIZE - *rdct, 0);
+		ssize_t rc = RECV(file_sock, rdbf, BUF_SIZE - *rdct, 0);
 		if (rc == -1) {
 			perror("Error reading on stream socket");
 			exit(1);
@@ -70,7 +84,8 @@ char* obtain_file_info(int file_sock, void *read_buf, size_t *rdct, int *fln) {
 	// Obtain the file length
 	void *buf = malloc(4);
 	memcpy(buf, read_buf, 4);
-	*fln = *((int*)buf);
+	// Change the host order	
+	*fln = ntohl(*((int*)buf));
 	free(buf);
 	// Obtain the file name. Note that the file name is succeeded by a '\0'
 	buf = malloc(20);
@@ -99,7 +114,7 @@ void write_all(int fd, void *buffer, size_t nbyte) {
 	while (want > 0) {
 		wsz = write(fd, buffer, want);
 		if (wsz == -1) {
-			perror("Error writing the file!");
+			perror("Error writing the file");
 			exit(1);
 		}
 		want -= wsz;
@@ -118,7 +133,7 @@ void write_file(int file_sock, int fd, int file_len, void *read_buf, int read_co
 	file_left_len -= read_count - 24;
 	// Continue reading and writing
 	while (file_left_len > 0) {
-		read_count = recv(file_sock, read_buf, BUF_SIZE, 0);
+		read_count = RECV(file_sock, read_buf, BUF_SIZE, 0);
 		if (read_count == -1) {
 			perror("Error reading on stream socket");
 			exit(1);
@@ -131,21 +146,38 @@ void write_file(int file_sock, int fd, int file_len, void *read_buf, int read_co
 }
 
 // Server program called with no argument
-int main() {
+int main(int argc, char *argv[]) {
+
+	if (argc != 2) {
+		printf("Number of argument is wrong! Usage is ftps 1060.\n");	
+		exit(1);
+	}
+	char *port = argv[1];
+	if (atoi(port) != 1060) {
+		printf("Error! The port number must be 1060!\n");
+	}
+	/* This part is not used because the port number is hardcoded as 1060
+	if (check_port(port) < 0) {
+		printf("Error! The port number is invalid!\n");
+		exit(1); 
+	}
+	*/
+	
 	int sock;                     // initial socket descriptor
 	int file_sock;                /* accepted socket descriptor,
                                    * each client connection has a
-                                   * unique socket descriptor*/
+                                   * unique socket descriptor.
+								   * This variable is not used this time*/
 	struct sockaddr_in sin_addr;  // structure for socket name setup
 
-	printf("TCP server waiting for remote connection from clients ...\n");
-	construct_TCP(&sock, &file_sock, &sin_addr);
+	construct_connection(&sock, &file_sock, &sin_addr);
+	printf("FTP server waiting for remote connection from clients ...\n");
   	
 	// Create a new folder and put the file in.
 	char *dir = "FTPFolder";
 	if (mkdir(dir, 0777) == -1) {
 		if (errno != EEXIST) {
-			perror("Error creating a new folder to hold the file!");
+			perror("Error creating a new folder to hold the file");
 			exit(1);
 		} else {
 			printf("Folder %s exists. Will put the file into this folder.\n", dir);
@@ -174,7 +206,7 @@ int main() {
 	ffn[strlen(filename)] = '\0';
 	int fd = open(full_filename, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, 0777);
 	if (fd == -1) {
-		perror("Error creating the file!");
+		perror("Error creating the file");
 		exit(1);
 	}
 	free(full_filename);
@@ -188,6 +220,6 @@ int main() {
 	read_buf = NULL;
 	// close all connections and remove socket file
 	close(fd);
-	close(file_sock);
+	//close(file_sock);
 	close(sock);
 }

@@ -6,152 +6,254 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <netdb.h>
+#include <strings.h>
 
 // This is the port tahtthat tcpd will always listen to
 #define INNER_PORT 1040
 #define LOCAL_IP "127.0.0.1"
+#define TROLL_PORT 1050
+#define TROLL_IP "164.107.113.20" /* gamma.cse.ohio-state.edu */
+#define SERVER_IP "164.107.113.23" /* eta.cse.ohio-state.edu */
+#define SERVER_PORT 1060
 #define MSS 1000
 
-// Helper function used to make sure all data is sent
-void send_all(nt sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen) {
-	ssize_t sent;
-	size_t left = len;
-	while (left > 0) {
-		sent = sendto(sockfd, buf, len, flags, dest_addr, addrlen);
-		if (sent == -1) {
-			perror("Error sending packet to ftps!");
-			exit(1);
-		}
-		left -= sent;
+
+// Helper function creates a socket and bind it for local communication
+void local_socket(int *loc_sockfd, struct sockaddr_in *local_addr) {
+	*loc_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (*loc_sockfd < 0) {
+		perror("Error opening UDP socket in tcpd");
+		exit(1);
 	}
+	local_addr->sin_family = AF_INET;
+	local_addr->sin_port = htons(INNER_PORT);
+	local_addr->sin_addr.s_addr = htonl(INADDR_ANY);
+	memset((void *)&(local_addr->sin_zero), '\0', 8);	
+	socklen_t socklen = sizeof(struct sockaddr_in);
+	if (bind(*loc_sockfd, (struct sockaddr *)local_addr, socklen) == -1) {
+		perror("Error in tcpd to bind socket");
+		exit(1);
+	}	
 }
 
-// Helper function used to make sure a troll packet (size MSS) is obtained
-void read_all(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen){
-	void *bf = buf;
-	size_t left_len = len;
-	while (left_len > 0) {
-		ssize_t rc = recvfrom(sockfd, bf, left_len, flags, src_addr, addrlen);
-		if (rc == -1) {
-			perror("Error reading from troll!");
-			exit(1);
-		}
-		left_len -= rc;
-		bf = (char *)bf + rc;
+// Helper function creates a socket and bind it for communication with troll
+void troll_socket(int *tro_sockfd, struct sockaddr_in *troll_addr) {
+	*tro_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (*tro_sockfd < 0) {
+		perror("Error opening UDP socket in tcpd");
+		exit(1);
+	}
+	troll_addr->sin_family = AF_INET;
+	troll_addr->sin_port = htons(TROLL_PORT);
+	troll_addr->sin_addr.s_addr = htonl(INADDR_ANY);
+	memset((void *)&(troll_addr->sin_zero), '\0', 8);	
+	socklen_t socklen = sizeof(struct sockaddr_in);
+	if (bind(*tro_sockfd, (struct sockaddr *)troll_addr, socklen) == - 1) {
+		perror("Error in tcpd to bind socket");
+		exit(1);
 	}
 }
 
 // Implementation of the server side of tcpd
 void server() {
-	int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sockfd < 0) {
-		perror("Error opening UDP socket!");
-		exit(1);	
-	}	
-	
-	// First obtain the data from troll
-	struct sockaddr_in troll_addr;
-	troll_addr.sin_family = AF_INET;
-	troll_addr.sin_port = htons(OUTER_PORT);
-	troll_addr.sin_addr.s_addr = INADDR_ANY;
-	memset(&(troll_addr.sin_zero), '\0', 8);	
-	void *buf = malloc(sizeof(char) * MSS);
-	read_all(sockfd, buf, MSS, 0, (sockaddr *)&troll_addr, sizeof(sockaddr_in *));
-
-	// Remove the first 16 bytes information which is about troll
-	buf = (char *)buf + 16; 
-	
-	// Then send them to ftps
+	// Open a socket for communicating with ftps
+	int loc_sockfd = 0;
 	struct sockaddr_in local_addr;
-	local_addr.sin_family = AF_INET;
-	local_addr.sin_port = htons(INNER_PORT);
-	local_addr.sin_addr.s_addr = inet_addr(LOCAL_IP);
-	memset(&(local_addr.sin_zero), '\0', 8);	
-	send_all(sockfd, buf, MSS - 16, 0, (struct sockaddr *)&local_addr, sizeof(sockaddr_in));
-	free(buf);
-	buf = NULL;
+	local_socket(&loc_sockfd, &local_addr);
+	socklen_t socklen = sizeof(struct sockaddr_in);	
+
+	// Open another socket for communicating and obtain the data from troll
+	int tro_sockfd = 0;
+	struct sockaddr_in troll_addr;
+	troll_socket(&tro_sockfd, &troll_addr);
+	while (1) {
+		// ftps will first send the request packet size to inform tcpd that it is ready to receive data.
+		void *bf = malloc(sizeof(char) * 4);
+		ssize_t rcvd = recvfrom(loc_sockfd, bf, 4, MSG_WAITALL, NULL, NULL);
+		if (rcvd < 0) {
+			perror("Error in tcpd server to receive data from ftps!");
+			close(loc_sockfd);
+			close(tro_sockfd);
+			exit(1);
+		}
+		uint32_t rqstlen = *((uint32_t *)bf);
+		//uint32_t rqstlen = ntohl(*((uint32_t *)bf));
+		free(bf);
+		bf = NULL;		
+		// Receive a packet from troll
+		void *buf = malloc(sizeof(char) * MSS);
+		//receive_all(tro_sockfd, buf, MSS, 0, NULL, NULL);
+		socklen_t trolen = sizeof(struct sockaddr_in);
+		rcvd = recvfrom(tro_sockfd, buf, MSS, 0, (struct sockaddr *)&troll_addr, &trolen);
+		if (rcvd < 0){
+			perror("Error receiving data from troll");
+			close(loc_sockfd);
+			close(tro_sockfd);
+			exit(1);
+		}
+		if (rcvd < 16) {
+			printf("Error! The packet size from troll is less than 16 bytes!\n");
+			close(loc_sockfd);
+			close(tro_sockfd);
+			exit(1);
+		}
+		// Remove the first 16 bytes information in  troll packet which is about the sender
+		bf = (char *)buf + 16; 
+		// Then send them to ftps. The troll packet  may be truncated smaller if too large
+		int left = rcvd - 16;
+		ssize_t sent;
+		size_t want_send = rqstlen;
+		while (left > 0) {
+			sent = sendto(loc_sockfd, bf, want_send, 0, (struct sockaddr *)&local_addr, socklen);
+			if (sent < 0) {
+				perror("Error sending data to ftps");
+				close(loc_sockfd);
+				close(tro_sockfd);
+				exit(1);
+			}
+			left -= sent;
+			bf = (char *)bf + sent;
+			if (left > rqstlen) {
+				want_send = rqstlen;
+			} else {
+				want_send = left;
+			}
+		} 
+		free(buf);
+		buf = NULL;
+	}
+}
+
+/*
+ * This functon reads all the bytes
+ */
+void recvAll(int sockfd, void *buf, int len, unsigned int flag, struct sockaddr *from, int *fromlen) {
+	int bytesRead = 0;
+	while(bytesRead < len) {
+		fprintf(stderr, "Within recvAll.\n");
+		bytesRead += recvfrom(sockfd, (void*)(((char*)buf)+bytesRead), len-bytesRead, flag, from, fromlen);
+		fprintf(stderr, "Received %d bytes\n", bytesRead);
+		fprintf(stderr, "Want %d bytes\n", len);
+		// only useful for once
+		if(bytesRead == -1) {
+			fprintf(stderr, "tcpd -c: ERROR: Fail when receiving the file.\n");
+			exit(-1);
+		}
+	}
+	fprintf(stderr, "Exit recvAll\n");
+}
+
+/*
+ * This functon sends all the bytes
+ */
+void sendAll(int sockfd, void *buf, int len, unsigned int flag, struct sockaddr *to, int tolen) {
+	int bytesSent = 0;
+	struct timespec timeOut, timeRm;
+	timeOut.tv_sec = 0;
+	timeOut.tv_nsec = 100000000;
+	while(bytesSent < len) {
+		bytesSent += sendto(sockfd, (void*)(((char*)buf)+bytesSent), len-bytesSent, flag, to, tolen);
+		// only useful for once
+		if(bytesSent == -1) {
+			fprintf(stderr, "tcpd -c: ERROR: Fail when receiving the file.\n");
+			exit(-1);
+		}
+		nanosleep(timeOut, timeRm);
+	}
 }
 
 // Implementation of the client side of tcpd
 void client() {
-	int socketfdIn = -1;
-    int socketfdOut = -1;
-    int socketfdTroll = -1;
+	int sockfdIn = -1;
+    int sockfdOut = -1;
     int bufOffset = 0;
     int headerSize = sizeof(struct sockaddr_in);
 	uint32_t fileSize = 0;
-	uint64_t bytesLeft = 0;
+	int64_t bytesLeft = 0;
 	struct sockaddr_in inAddr;
-	struct sockaddr_in outAddr;
+	struct sockaddr_in tcpdsAddr;
     struct sockaddr_in trollAddr;
-	void *buf = malloc(sizeof(char) * MSS);
+	uint8_t *buf = malloc(sizeof(char) * MSS);
+	struct {
+		struct sockaddr_in dest;
+		char body[984];
+	} message;
+	socklen_t addrlen;
+	struct hostent *host;
+	char *servername = "eta.cse.ohio-state.edu";
 	
 	// create input socket
-	socketfdIn = socket(AF_INET, SOCK_DGRAM, 0);
-	if(socketfd == -1) {
+	// to receive data from ftpc
+	sockfdIn = socket(AF_INET, SOCK_DGRAM, 0);
+	if(sockfdIn == -1) {
 		fprintf(stderr, "ERROR: tcpd can't create UDP socket.\n");
 		exit(1);
 	}
-    /*
-	// create output socket
-    socketfdOut = socket(AF_INET, SOCK_DGRAM, 0);
-	if(socketfd == -1) {
+    // create output socket
+	// to send data to troll
+    sockfdOut = socket(AF_INET, SOCK_DGRAM, 0);
+	if(sockfdOut == -1) {
 		fprintf(stderr, "ERROR: tcpd can't create UDP socket.\n");
-		exit(1);
-	}
-	*/
-    // create Troll socket
-    socketfdTroll = socket(AF_INET, SOCK_DGRAM, 0);
-	if(socketfd == -1) {
-		fprintf(stderr, "ERROR: tcpd can't create UDP socket.\n");
+		close(sockfdIn);
 		exit(1);
 	}
 
-	// bind input socket to port 1040
+	// bind input socket to port TCPD_PORT
 	inAddr.sin_family = AF_INET;
 	inAddr.sin_port = htons(1040);
-	inAddr.sin_addr.s_addr = inet_addr(LOCAL_IP);
+	inAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	memset(&(inAddr.sin_zero), '\0', 8);
-	bind(socketfdIn, (struct sockaddr*)&inAddr, sizeof(inAddr));
-    // bind output socket to remote ip and port
-	outAddr.sin_family = AF_INET;
-	outAddr.sin_port = htons(1060);
-	outAddr.sin_addr.s_addr = inet_addr("164.107.113.23");
-	memset(&(outAddr.sin_zero), '\0', 8);
-	/*bind(socketfdOut, (struct sockaddr*)&outAddr, sizeof(outAddr));*/
-    // bind Troll socket to port 1050
+	if(bind(sockfdIn, (struct sockaddr*)&inAddr, sizeof(inAddr)) != 0) {
+		fprintf(stderr, "Error: bind.\n");
+		exit(-1);
+	}
+    // set troll socket to port TROLL_IP and TROLL_PORT
 	trollAddr.sin_family = AF_INET;
 	trollAddr.sin_port = htons(1050);
-	trollAddr.sin_addr.s_addr = inet_addr("164.107.113.20");
+	trollAddr.sin_addr.s_addr = inet_addr(TROLL_IP);
 	memset(&(trollAddr.sin_zero), '\0', 8);
-	bind(socketfdTroll, (struct sockaddr*)&trollAddr, sizeof(trollAddr));
+    // set server socket to port SERVER_IP and TROLL_PORT
+	tcpdsAddr.sin_family = htons(AF_INET);
+	tcpdsAddr.sin_port = htons(1050);
+	host = gethostbyname(servername);
+	if(host == NULL) {
+		fprintf(stderr, "Bad address!\n");
+		exit(-1);
+	}
+	//tcpdsAddr.sin_addr.s_addr = inet_addr(SERVER_IP);
+	//memcpy((char*)&tcpdsAddr.sin_addr, host->h_addr, (host->h_length));
+	bcopy(host->h_addr, (char*)&tcpdsAddr.sin_addr, host->h_length);
+	memset(&(tcpdsAddr.sin_zero), '\0', 8);
     
-	// get the file size
-	recvfrom(socketfdIn, buf+headerSize, 4, 0, (struct sockaddr*)&inAddr, sizeof(inAddr));
+	// read the first package and get the file size
+	addrlen = sizeof(inAddr);
+	recvfrom(sockfdIn, (void*)(buf+headerSize), MSS-headerSize, 0, (struct sockaddr*)&inAddr, &addrlen);
 	// calculate the total size of data
-	fileSize = ntohl(*((int*)buf));
-	bytesLeft = fileSize + 20l;
-    bufOffset = 4 + headerSize;
+	fileSize = *((uint32_t*)(buf+headerSize));
+	bytesLeft = fileSize + 24l - (MSS + headerSize);
+	fprintf(stderr, "%d bytes left\n", bytesLeft);
 	// start to transfer
-    while(true) {
+    while(1) {
+        // add header
+        memcpy(buf, (void*)&tcpdsAddr, sizeof(tcpdsAddr));
+        // send to troll
+        sendAll(sockfdOut, buf, MSS, 0, (struct sockaddr*)&trollAddr, sizeof(trollAddr));
+        if(bytesLeft <= 0) {
+            break;
+        }
         int sizeRead = 0;
         // read from ftpc
         if(bytesLeft >= MSS - bufOffset) {
-            sizeRead = recvfrom(socketfdIn, buf+bufOffset, MSS-bufOffset, 0, (struct sockaddr*)&inAddr, sizeof(inAddr));
-        } else {
-            sizeRead = recvfrom(socketfdIn, buf+bufOffset, bytesLeft, 0, (struct sockaddr*)&inAddr, sizeof(inAddr));
+			sizeRead = MSS - bufOffset;
+            recvAll(sockfdIn, (void*)(buf+bufOffset), MSS-bufOffset, 0, (struct sockaddr*)&inAddr, &addrlen);
+        } else if(bytesLeft > 0) {
+			sizeRead = bytesLeft;
+            recvAll(sockfdIn, (void*)(buf+bufOffset), bytesLeft, 0, (struct sockaddr*)&inAddr, &addrlen);
         }
-        // add header
-        memcpy(buf, (void*)&outAddr, sizeof(outAddr));
-        // send to troll
-        sendto(socketfdTroll, buf, MSS, 0, (struct sockaddr*)&trollAddr, sizeof(trollAddr));
-        // update counter
-        bufOffset = 4;
-        bytesLeft -= sizeRead;
-        if(bytesLeft == 0) {
-            break;
-        }
+		bytesLeft -= sizeRead;
     }
 }
 
@@ -167,7 +269,7 @@ void main(int argc, char *argv[]) {
 	} else if (strcmp(argv[1], "-c") == 0) {
 		client();
 	} else {
-		printf("Error! The argument is not acceptable!");
+		printf("Error! The argument is not acceptable!\n");
 		exit(1);
 	}
 }

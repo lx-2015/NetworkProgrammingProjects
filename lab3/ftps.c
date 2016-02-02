@@ -20,6 +20,8 @@
 
 #define BUF_SIZE 1000	// Buffer size
 #define PORT 1060
+#define LOCAL_IP "127.0.0.1"
+#define INNER_PORT 1040
 
 // This function checks the validity of the port number
 // But it is not used this time because the port number is hardcoded
@@ -48,22 +50,25 @@ int check_port(char *port) {
 // Construct the connection. Note that *fsk is not used.
 void construct_connection(int *sk, int *fsk, struct sockaddr_in *sia) {
 	// Initialize socket connection in unix domain
-	if((*sk = SOCKET(AF_INET, SOCK_DGRAM, 0)) < 0){
+	if((*fsk = SOCKET(AF_INET, SOCK_DGRAM, 0)) < 0){
 		perror("Error opening UDP socket");
 		exit(1);
 	}
-  
+	/*
 	// Construct name of socket to send to
 	sia->sin_family = AF_INET;
-	sia->sin_addr.s_addr = htonl(INADDR_ANY);
-	sia->sin_port = htons(PORT);
+	//sia->sin_addr.s_addr = htonl(INADDR_ANY);
+	//sia->sin_port = htons(PORT);
+	sia->sin_addr.s_addr = inet_addr(LOCAL_IP);
+	sia->sin_port = htons(INNER_PORT);
 	memset(&(sia->sin_zero), '\0', 8);
 
 	// Bind socket name to socket
-	if(bind(*sk, (struct sockaddr *)sia, sizeof(struct sockaddr_in)) < 0) {
+	if(bind(*fsk, (struct sockaddr *)sia, sizeof(struct sockaddr_in)) < 0) {
 		perror("Error binding UDP socket");
 		exit(1);
 	}
+	*/
 }
 
 // Helper function used to obtain the file information. 

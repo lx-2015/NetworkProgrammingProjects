@@ -75,7 +75,7 @@ char* obtain_file_info(int file_sock, void *read_buf, size_t *rdct, int *fln) {
 		/* read from file_sock and place in read_buf */
 		ssize_t rc = RECV(file_sock, rdbf, BUF_SIZE - *rdct, 0);
 		if (rc == -1) {
-			perror("Error reading on socket");
+			perror("Error reading on stream socket");
 			exit(1);
 		}
 		*rdct += rc;
@@ -84,9 +84,8 @@ char* obtain_file_info(int file_sock, void *read_buf, size_t *rdct, int *fln) {
 	// Obtain the file length
 	void *buf = malloc(4);
 	memcpy(buf, read_buf, 4);
-	// Change to host order	
-	//*fln = ntohl(*((int*)buf));
-	*fln = *((int *)buf);
+	// Change the host order	
+	*fln = ntohl(*((int*)buf));
 	free(buf);
 	// Obtain the file name. Note that the file name is succeeded by a '\0'
 	buf = malloc(20);
@@ -127,42 +126,28 @@ void write_file(int file_sock, int fd, int file_len, void *read_buf, int read_co
 	// Shift the void* rdbf by 20 bytes, buf read_buf stays unchanged
 	void *rdbf = (char*)read_buf + 24;
 	// Write the first portion of the file
-	if (file_len < read_count) {
-		// If the file is shorter than one packet
-		write_all(fd, rdbf, file_len);
-	} else {
-		// If the file is longer than one packet
-		write_all(fd, rdbf, read_count - 24);
+	write_all(fd, rdbf, read_count - 24);
+	// Zeros read_buf
+	memset(read_buf, 0, read_count);
+	int file_left_len = file_len;
+	file_left_len -= read_count - 24;
+	// Continue reading and writing
+	while (file_left_len > 0) {
+		read_count = RECV(file_sock, read_buf, BUF_SIZE, 0);
+		if (read_count == -1) {
+			perror("Error reading on stream socket");
+			exit(1);
+		}
+		write_all(fd, read_buf, read_count);
 		// Zeros read_buf
 		memset(read_buf, 0, read_count);
-		int file_left_len = file_len;
-		file_left_len -= read_count - 24;
-		// Continue reading and writing
-		while (file_left_len > 0) {
-			read_count = RECV(file_sock, read_buf, BUF_SIZE, 0);
-			if (read_count == -1) {
-				perror("Error reading on socket");
-				exit(1);
-			}
-			// Deal with the last packet which may be smaller than MSS
-			if (file_left_len > read_count) {
-				write_all(fd, read_buf, read_count);
-				// Zeros read_buf
-				memset(read_buf, 0, read_count);
-				file_left_len -= read_count;
-			} else {
-				write_all(fd, read_buf, file_left_len);
-				// Zeros read_buf
-				memset(read_buf, 0, file_left_len);
-				file_left_len -= file_left_len;
-			}
-		}
+		file_left_len -= read_count;
 	}
 }
 
 // Server program called with no argument
 int main(int argc, char *argv[]) {
-	// Check the validity of arguments
+
 	if (argc != 2) {
 		printf("Number of argument is wrong! Usage is ftps 1060.\n");	
 		exit(1);
@@ -177,6 +162,7 @@ int main(int argc, char *argv[]) {
 		exit(1); 
 	}
 	*/
+	
 	int sock;                     // initial socket descriptor
 	int file_sock;                /* accepted socket descriptor,
                                    * each client connection has a
@@ -236,6 +222,4 @@ int main(int argc, char *argv[]) {
 	close(fd);
 	//close(file_sock);
 	close(sock);
-	printf("ftps completed!\n");
-	return 0;
 }

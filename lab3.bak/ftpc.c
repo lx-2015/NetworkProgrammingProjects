@@ -15,7 +15,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <time.h>
 #include "cse5462lib.h"
 
 #define BUF_SIZE 984
@@ -24,21 +23,50 @@
 #define SERVER_PORT_STR "1060"
 
 /*
+ * This function checks the validity of the port number
+ */
+int checkPort(char *port) {
+	int i = 0;
+	uint32_t sum = 0;
+	// check length
+	int length = strlen(port);
+	if(length > 5) {
+		return -1;
+	}
+	// check each digit and range
+	for(i = 0; i < length; ++i) {
+		if(port[i] < '0' || port[i] > '9') {
+			return -1;
+		} else {
+			sum = (sum * 10) + (port[i] - '0');
+			if(sum > 65536) {
+				return -1;
+			}
+		}
+	}
+
+	return 0;
+}
+
+/*
  * This function checks the number of the arguments
- * as well as the validity of each argument.
+ * as well as user's permission on the target file.
+ * The connectability to the specified server will be checked later.
  */
 int preCheckArgs(int argc, char *argv[]) {
+	struct in_addr ipAddr;
 	// Check the number of arguments.
 	if(argc != 4) {
 		fprintf(stderr, "ftpc: ERROR: Wrong usage of ftpc.\n");
 		fprintf(stderr, "             Please use the following pattern to launch the ftpc program.\n");
-		fprintf(stderr, "             $ ftpc <host-ip> <remote-port> <local-file-to-transfer>\n");
+		fprintf(stderr, "             $ ftpc %s %s <local-file-to-transfer>\n", SERVER_IP, SERVER_PORT_STR);
 		return -1;
 	}
 	
 	// Check the IP address.
 	// The user should provide the host IP address,
 	// which is hardcoded in this project.
+	ipAddr.s_addr = inet_addr(argv[1]);
 	if(strcmp(argv[1], SERVER_IP) != 0) {
 		fprintf(stderr, "ftpc: ERROR: Please provide the server address %s. \n", SERVER_IP);
 		return -1;
@@ -52,6 +80,9 @@ int preCheckArgs(int argc, char *argv[]) {
 		return -1;
 	}
 
+	/*
+	 * need to consider the directory before the file name
+	 */
 	// check the length of the file name
 	if(strlen(argv[3]) > 20) {
 		fprintf(stderr, "ftpc: ERROR: File name is longer than 20 Bytes.\n");
@@ -69,7 +100,7 @@ int preCheckArgs(int argc, char *argv[]) {
  * This function try to connect to ther server
  * with the IP address and port information
  * provided by the user.
- * In this project, this function does not have any effect.
+ * In this project, this is a fake function.
  */
 int connectServer(int sockfd, char *ipAddress, char *port) {
 	struct sockaddr_in serverAddress;
@@ -77,6 +108,7 @@ int connectServer(int sockfd, char *ipAddress, char *port) {
 	// construct the server address
 	serverAddress.sin_family = AF_INET;						/*sin_family*/
 	serverAddress.sin_port = htons((uint16_t)SERVER_PORT);	/*sin_port*/
+	//serverAddress.sin_port = SERVER_PORT;
 	serverAddress.sin_addr.s_addr= inet_addr(SERVER_IP);	/*sin_addr*/
 	memset((void*)&(serverAddress.sin_zero), '\0', 8);		/*sin_zero*/
 
@@ -91,19 +123,13 @@ int connectServer(int sockfd, char *ipAddress, char *port) {
 }
 
 /*
- * This function guarantee to send out all the content in the buf
+ * This function guarantee to send all the content in the buf
  */
 void sendAll(int sockfd, uint8_t *buf, int length) {
 	int bytesSent = 0;
-	struct timespec timeReq, timeRem;
-	timeReq.tv_sec = 0;
-	timeReq.tv_nsec = 10000000;
 	while(bytesSent < length) {
-		int sentInThisRun = 0;
-		sentInThisRun = SEND(sockfd, (void*)(buf+bytesSent), length-bytesSent, 0);
-		nanosleep(&timeReq, &timeRem);
-		bytesSent += sentInThisRun;
-		if(sentInThisRun == -1) {
+		bytesSent += SEND(sockfd, (void*)(buf+bytesSent), length-bytesSent, 0);
+		if(bytesSent == -1) {
 			fprintf(stderr, "ftpc: ERROR: Fail while sending the file.\n");
 			exit(-1);
 		}
@@ -114,20 +140,26 @@ void sendAll(int sockfd, uint8_t *buf, int length) {
  * This function updates the progress
  */
 void updateProgress(uint32_t complete, uint32_t total) {
-	printf("ftpc: Bytes sent %u/%u.\n", complete, total);
+	int i = 0;
+	unsigned percentage = complete * 100l / total;
+	printf("\rftpc: Sending file: %u%%", percentage);
+	if(complete == total) {
+		printf("\n");
+	}
 }
 
 /*
- * This function sends out the content in the target file
- * to the tcpd trunk by trunk.
+ * This function sends the content in the target file
+ * to the server trunk by trunk.
  */
 void sendFileToServer(int sockfd, char *targetFile) {
 	struct stat stat_buf;
-	uint32_t fileSize = 0;	/* size of the file */
-	uint32_t fileOffset = 0;	/* size of the content which is sent */
-	uint8_t buf[BUF_SIZE];	/* buf of the content to be sent */
-	int bufOffset = 0;	/* records how many content in the file */
-	int fd = -1;	/* the file descriptor for the sending file */
+	uint32_t fileSize = 0;
+	uint8_t buf[BUF_SIZE];
+	int bufOffset = 0;
+	int fd = -1;
+	uint32_t fileOffset = 0;
+	uint32_t networkFileSize = 0;
 
 	// get the file size
 	if(stat(targetFile, &stat_buf) == -1) {
@@ -144,14 +176,17 @@ void sendFileToServer(int sockfd, char *targetFile) {
 	}
 
 	// create the header
-	memcpy((void*)buf, (void*)&fileSize, 4);	/* file size */
-	bufOffset += 4;	/* forward to the slot for file name */
+	//networkFileSize = htonl(fileSize);
+	networkFileSize = fileSize;
+	memcpy((void*)buf, (void*)&networkFileSize, 4);	/* file size */
+	bufOffset += 4;
 	memcpy((void*)(buf+4), (void*)targetFile, strlen(targetFile));	/* file name */
-	bufOffset += strlen(targetFile); /* forward to the end of the file name */
-	buf[bufOffset] = '\0';	/* place '\0' to end the file name */
-	bufOffset = 24;	/* forward to the slot for file content */
+	bufOffset += strlen(targetFile);
+	buf[bufOffset] = '\0';
+	bufOffset = 24;
 
-	// fill each buffer and send to tcpd
+	// fill the buffer
+	printf("ftpc: Sending file: 0%%");
 	while(1) {
 		// read in the content
 		int sizeRead = pread(fd, buf+bufOffset, BUF_SIZE - bufOffset, fileOffset);
@@ -162,7 +197,7 @@ void sendFileToServer(int sockfd, char *targetFile) {
 		if(fileOffset >= fileSize) {
 			sendAll(sockfd, buf, bufOffset);
 			updateProgress(fileOffset, fileSize);
-			break;
+			return;
 		}
 		// send the buf if the buf is filled
 		if(bufOffset == BUF_SIZE) {
@@ -191,7 +226,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// create the socket
-	sockfd = SOCKET(AF_INET, SOCK_DGRAM, 0); // It's actually an UDP socket
+	sockfd = SOCKET(AF_INET, SOCK_DGRAM, 0);	// It's actually an UDP socket
 	if(sockfd < 0) {
 		fprintf(stderr, "ftpc: ERROR: Can't create the socket.\n");
 		exit(-1);

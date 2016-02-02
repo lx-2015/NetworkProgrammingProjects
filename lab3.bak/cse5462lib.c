@@ -43,7 +43,7 @@ ssize_t SEND(int sockfd, const void *buf, size_t len, int flags) {
     struct sockaddr_in tcpdAddr;
     tcpdAddr.sin_family = AF_INET;
     tcpdAddr.sin_port = htons(1040);
-    tcpdAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    tcpdAddr.sin_addr.s_addr = inet_addr("164.107.113.22");
     memset(&(tcpdAddr.sin_zero), '\0', 8);
     // send!
     bytesSent = sendto(sockfd, buf, len, 0, (struct sockaddr*)&tcpdAddr, sizeof(tcpdAddr));
@@ -74,7 +74,7 @@ ssize_t RECV(int sockfd, void *buf, size_t len, int flags) {
 	free(bf);
 	bf = NULL;
 	// Obtain data from tcpd server
-	ssize_t received = recvfrom(loc_sockfd, buf, len, flags, (struct sockaddr *)&back_addr, &socklen);
+	ssize_t received = recvfrom(loc_sockfd, buf, len, flags, &back_addr, &socklen);
 	return received;
 }
 
